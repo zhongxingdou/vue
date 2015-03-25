@@ -193,6 +193,16 @@ p.convert = function (key, val) {
       if(setter) {
         newVal = setter.call(this, newVal, val)
       }
+
+      // notify guards
+      var guards = this.__guards__ && this.__guards__[key]
+      if (guards) {
+        var i, l
+        for (i=0,l=guards.length; i<l; i++) {
+          guards[i].call(this, newVal, val)
+        }
+      }
+
       if (newVal === val) return
       // remove dep from old value
       var oldChildOb = val && val.__ob__

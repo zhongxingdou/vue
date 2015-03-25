@@ -54,7 +54,8 @@ module.exports = function (grunt) {
       },
       browsers: {
         options: {
-          browsers: ['Chrome', 'Firefox', 'Safari'],
+          // browsers: ['Chrome', 'Firefox', 'Safari'],
+          browsers: ['Chrome'],
           reporters: ['progress']
         }
       },
