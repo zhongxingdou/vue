@@ -191,7 +191,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.extend = function (extendOptions) {
 	  extendOptions = extendOptions || {}
 	  var Super = this
-	  var Sub = createClass(extendOptions.name || 'VueComponent')
+	  var Sub = createClass(
+	    extendOptions.name ||
+	    Super.options.name ||
+	    'VueComponent'
+	  )
 	  Sub.prototype = Object.create(Super.prototype)
 	  Sub.prototype.constructor = Sub
 	  Sub.cid = cid++
@@ -219,7 +223,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function createClass (name) {
 	  return new Function(
-	    'return function ' + _.camelize(name, true) +
+	    'return function ' + _.classify(name) +
 	    ' (options) { this._init(options) }'
 	  )()
 	}
@@ -395,6 +399,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var options = this.$options
 	  registerCallbacks(this, '$on', options.events)
 	  registerCallbacks(this, '$watch', options.watch)
+	  registerCallbacks(this, '$guard', options.guard)
 	}
 
 	/**
@@ -426,17 +431,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Vue} vm
 	 * @param {String} action
 	 * @param {String} key
+	 * @param {Boolean} needBindKeyToHandler
 	 * @param {*} handler
 	 */
 
-	function register (vm, action, key, handler) {
+	function register (vm, action, key, handler, needBindKeyToHandler) {
+	  if (key === '*' && action === '$watch'){
+	    var keys = Object.keys(vm.$data)
+	   
+	    return keys.forEach(function (key) {
+	      register(vm, action, key, handler, true)
+	    })
+	  }
+
 	  var type = typeof handler
 	  if (type === 'function') {
+	    if (needBindKeyToHandler) {
+	      handler = _.methodize(handler, key)
+	    }
 	    vm[action](key, handler)
 	  } else if (type === 'string') {
 	    var methods = vm.$options.methods
 	    var method = methods && methods[handler]
 	    if (method) {
+	      if (needBindKeyToHandler) {
+	        handler = _.methodize(handler, key)
+	      }
 	      vm[action](key, method)
 	    } else {
 	      _.warn(
@@ -647,7 +667,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  i = children.length
 	  while (i--) {
 	    var child = children[i]
-	    if (child.$options.inherit) {
+	    if (!child._repeat && child.$options.inherit) {
 	      child._digest()
 	    }
 	  }
@@ -821,7 +841,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports._initElement = function (el) {
 	  if (el instanceof DocumentFragment) {
 	    this._isBlock = true
-	    this.$el = this._blockStart = el.firstChild
+	    this._blockStart = el.firstChild
+	    this.$el = el.childNodes[1]
 	    this._blockEnd = el.lastChild
 	    this._blockFragment = el
 	  } else {
@@ -889,8 +910,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this._directives[i]._teardown()
 	  }
 	  // teardown all user watchers.
+	  var watcher
 	  for (i in this._userWatchers) {
-	    this._userWatchers[i].teardown()
+	    watcher = this._userWatchers[i]
+	    if (watcher) {
+	      watcher.teardown()
+	    }
 	  }
 	  // remove reference to self on $el
 	  if (this.$el) {
@@ -1032,6 +1057,35 @@ return /******/ (function(modules) { // webpackBootstrap
 	      vm._userWatchers[key] = null
 	    }
 	  }
+	}
+
+	exports.$guard = function (path, cb) {
+	  var pathes, prop, obj, guards
+
+	  pathes = Path.parse(path)
+	  if (pathes.length === 1) {
+	    prop = path
+	    obj = this._data
+	  } else if (pathes.length > 1) {
+	    prop = pathes.pop()
+	    obj = Path.get(this._data, pathes.join('.'))
+	  }
+
+
+	  if (!obj || !obj.hasOwnProperty(prop)) {
+	    return
+	  }
+
+	  if (!obj.hasOwnProperty('__guards__')) {
+	    _.define(obj, '__guards__', {}, false)
+	  }
+
+	  guards = obj.__guards__[prop]
+	  if (!guards) {
+	    guards = obj.__guards__[prop] = []
+	  } 
+
+	  guards.push(cb)
 	}
 
 	/**
@@ -1528,7 +1582,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (!ChildVue) {
 	      var optionName = BaseCtor.options.name
 	      var className = optionName
-	        ? _.camelize(optionName, true)
+	        ? _.classify(optionName)
 	        : 'VueComponent'
 	      ChildVue = new Function(
 	        'return function ' + className + ' (options) {' +
@@ -1736,14 +1790,15 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	exports.currency = function (value, sign) {
 	  value = parseFloat(value)
-	  if (!value && value !== 0) return ''
+	  if (!isFinite(value) || (!value && value !== 0)) return ''
 	  sign = sign || '$'
 	  var s = Math.floor(Math.abs(value)).toString(),
 	    i = s.length % 3,
 	    h = i > 0
 	      ? (s.slice(0, i) + (s.length > 3 ? ',' : ''))
 	      : '',
-	    f = '.' + value.toFixed(2).slice(-2)
+	    v = Math.abs(parseInt((value * 100) % 100, 10)),
+	    f = '.' + (v < 10 ? ('0' + v) : v)
 	  return (value < 0 ? '-' : '') +
 	    sign + h + s.slice(i).replace(digitsRE, '$1,') + f
 	}
@@ -1808,6 +1863,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	_.extend(exports, __webpack_require__(48))
+
 
 /***/ },
 /* 14 */
@@ -2194,11 +2250,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	module.exports = function compile (el, options, partial, asParent) {
+	  var isBlock = el.nodeType === 11
 	  var params = !partial && options.paramAttributes
+	  // if el is a fragment, this is a block instance
+	  // and paramAttributes will be stored on the first
+	  // element in the template. (excluding the _blockStart
+	  // comment node)
+	  var paramsEl = isBlock ? el.childNodes[1] : el
 	  var paramsLinkFn = params
-	    ? compileParamAttributes(el, params, options)
+	    ? compileParamAttributes(paramsEl, params, options)
 	    : null
-	  var nodeLinkFn = el instanceof DocumentFragment
+	  var nodeLinkFn = isBlock
 	    ? null
 	    : compileNode(el, options, asParent)
 	  var childLinkFn =
@@ -2220,7 +2282,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  return function link (vm, el) {
 	    var originalDirCount = vm._directives.length
-	    if (paramsLinkFn) paramsLinkFn(vm, el)
+	    if (paramsLinkFn) {
+	      var paramsEl = isBlock ? el.childNodes[1] : el
+	      paramsLinkFn(vm, paramsEl)
+	    }
 	    // cache childNodes before linking parent, fix #657
 	    var childNodes = _.toArray(el.childNodes)
 	    if (nodeLinkFn) nodeLinkFn(vm, el)
@@ -2786,9 +2851,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (options.replace) {
 	      if (frag.childNodes.length > 1) {
 	        transcludeContent(frag, rawContent)
-	        // TODO: store directives on placeholder node
-	        // and compile it somehow
-	        // probably only check for v-with, v-ref & paramAttributes
+	        _.copyAttributes(el, frag.firstChild)
 	        return frag
 	      } else {
 	        var replacer = frag.firstChild
@@ -3812,7 +3875,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var wsRE = /\s/g
 	var newlineRE = /\n/g
-	var saveRE = /[\{,]\s*[\w\$_]+\s*:|'[^']*'|"[^"]*"/g
+	var saveRE = /[\{,]\s*[\w\$_]+\s*:|('[^']*'|"[^"]*")/g
 	var restoreRE = /"(\d+)"/g
 	var pathTestRE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*|\['.*?'\]|\[".*?"\]|\[\d+\])*$/
 	var pathReplaceRE = /[^\w$\.]([A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*|\['.*?'\]|\[".*?"\])*)/g
@@ -3833,13 +3896,23 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Save replacer
 	 *
+	 * The save regex can match two possible cases:
+	 * 1. An opening object literal
+	 * 2. A string
+	 * If matched as a plain string, we need to escape its
+	 * newlines, since the string needs to be preserved when
+	 * generating the function body.
+	 *
 	 * @param {String} str
+	 * @param {String} isString - str if matched as a string
 	 * @return {String} - placeholder with index
 	 */
 
-	function save (str) {
+	function save (str, isString) {
 	  var i = saved.length
-	  saved[i] = str.replace(newlineRE, '\\n')
+	  saved[i] = isString
+	    ? str.replace(newlineRE, '\\n')
+	    : str
 	  return '"' + i + '"'
 	}
 
@@ -4027,6 +4100,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	var uid = 0
+	var _ = __webpack_require__(11)
 
 	/**
 	 * A dep is an observable that can have multiple
@@ -4070,7 +4144,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	p.notify = function () {
-	  for (var i = 0, subs = this.subs; i < subs.length; i++) {
+	  // stablize the subscriber list first
+	  var subs = _.toArray(this.subs)
+	  for (var i = 0, l = subs.length; i < l; i++) {
 	    subs[i].update()
 	  }
 	}
@@ -4629,20 +4705,43 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	/**
+	 * Replace helper
+	 *
+	 * @param {String} _ - matched delimiter
+	 * @param {String} c - matched char
+	 * @return {String}
+	 */
+	function toUpper (_, c) {
+	  return c ? c.toUpperCase () : ''
+	}
+
+	/**
 	 * Camelize a hyphen-delmited string.
 	 *
 	 * @param {String} str
 	 * @return {String}
 	 */
 
-	var camelRE = /[-_](\w)/g
-	var capitalCamelRE = /(?:^|[-_])(\w)/g
+	var camelRE = /-(\w)/g
+	exports.camelize = function (str) {
+	  return str.replace(camelRE, toUpper)
+	}
 
-	exports.camelize = function (str, cap) {
-	  var RE = cap ? capitalCamelRE : camelRE
-	  return str.replace(RE, function (_, c) {
-	    return c ? c.toUpperCase () : ''
-	  })
+	/**
+	 * Converts hyphen/underscore/slash delimitered names into
+	 * camelized classNames.
+	 *
+	 * e.g. my-component => MyComponent
+	 *      some_else    => SomeElse
+	 *      some/comp    => SomeComp
+	 *
+	 * @param {String} str
+	 * @return {String}
+	 */
+
+	var classifyRE = /(?:^|[-_\/])(\w)/g
+	exports.classify = function (str) {
+	  return str.replace(classifyRE, toUpper)
 	}
 
 	/**
@@ -4746,6 +4845,52 @@ return /******/ (function(modules) { // webpackBootstrap
 	  })
 	}
 
+	/**
+	 * Debounce a function so it only gets called after the
+	 * input stops arriving after the given wait period.
+	 *
+	 * @param {Function} func
+	 * @param {Number} wait
+	 * @return {Function} - the debounced function
+	 */
+
+	exports.debounce = function(func, wait) {
+	  var timeout, args, context, timestamp, result
+	  var later = function() {
+	    var last = Date.now() - timestamp
+	    if (last < wait && last >= 0) {
+	      timeout = setTimeout(later, wait - last)
+	    } else {
+	      timeout = null
+	      result = func.apply(context, args)
+	      if (!timeout) context = args = null
+	    }
+	  }
+	  return function() {
+	    context = this
+	    args = arguments
+	    timestamp = Date.now()
+	    if (!timeout) {
+	      timeout = setTimeout(later, wait)
+	    }
+	    return result
+	  }
+	}
+
+	/**
+	 * Binding first parameter to func
+	 * @param  {Function} func
+	 * @param  {Object} firstParam
+	 * @return {Function} 
+	 */
+	exports.methodize = function(func, firstParam) {
+	  return function() {
+	    var slice = Array.prototype.slice
+	    var args = [firstParam].concat(slice.call(arguments))
+	    func.apply(this, args)
+	  }
+	}
+
 /***/ },
 /* 27 */
 /***/ function(module, exports, __webpack_require__) {
@@ -4772,55 +4917,50 @@ return /******/ (function(modules) { // webpackBootstrap
 	/**
 	 * Defer a task to execute it asynchronously. Ideally this
 	 * should be executed as a microtask, so we leverage
-	 * MutationObserver if it's available.
-	 * 
-	 * If the user has included a setImmediate polyfill, we can
-	 * also use that. In Node we actually prefer setImmediate to
-	 * process.nextTick so we don't block the I/O.
-	 * 
-	 * Finally, fallback to setTimeout(0) if nothing else works.
+	 * MutationObserver if it's available, and fallback to
+	 * setTimeout(0).
 	 *
 	 * @param {Function} cb
 	 * @param {Object} ctx
 	 */
 
-	var defer
-	/* istanbul ignore if */
-	if (typeof MutationObserver !== 'undefined') {
-	  defer = deferFromMutationObserver(MutationObserver)
-	} else
-	/* istanbul ignore if */
-	if (typeof WebkitMutationObserver !== 'undefined') {
-	  defer = deferFromMutationObserver(WebkitMutationObserver)
-	} else {
-	  defer = setTimeout
-	}
-
-	/* istanbul ignore next */
-	function deferFromMutationObserver (Observer) {
-	  var queue = []
-	  var node = document.createTextNode('0')
-	  var i = 0
-	  new Observer(function () {
-	    var l = queue.length
-	    for (var i = 0; i < l; i++) {
-	      queue[i]()
+	exports.nextTick = (function () {
+	  var callbacks = []
+	  var pending = false
+	  var timerFunc
+	  function handle () {
+	    pending = false
+	    var copies = callbacks.slice(0)
+	    callbacks = []
+	    for (var i = 0; i < copies.length; i++) {
+	      copies[i]()
 	    }
-	    queue = queue.slice(l)
-	  }).observe(node, { characterData: true })
-	  return function mutationObserverDefer (cb) {
-	    queue.push(cb)
-	    node.nodeValue = (i = ++i % 2)
 	  }
-	}
-
-	exports.nextTick = function (cb, ctx) {
-	  if (ctx) {
-	    defer(function () { cb.call(ctx) }, 0)
+	  /* istanbul ignore if */
+	  if (typeof MutationObserver !== 'undefined') {
+	    var counter = 1
+	    var observer = new MutationObserver(handle)
+	    var textNode = document.createTextNode(counter)
+	    observer.observe(textNode, {
+	      characterData: true
+	    })
+	    timerFunc = function () {
+	      counter = (counter + 1) % 2
+	      textNode.data = counter
+	    }
 	  } else {
-	    defer(cb, 0)
+	    timerFunc = setTimeout
 	  }
-	}
+	  return function (cb, ctx) {
+	    var func = ctx
+	      ? function () { cb.call(ctx) }
+	      : cb
+	    callbacks.push(func)
+	    if (pending) return
+	    pending = true
+	    timerFunc(handle, 0)
+	  }
+	})()
 
 	/**
 	 * Detect if we are in IE9...
@@ -5870,6 +6010,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	var _ = __webpack_require__(11)
+	var config = __webpack_require__(15)
 	var isObject = _.isObject
 	var isPlainObject = _.isPlainObject
 	var textParser = __webpack_require__(19)
@@ -5918,7 +6059,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.idKey =
 	      this._checkParam('track-by') ||
 	      this._checkParam('trackby') // 0.11.0 compat
-	    // cache for primitive value instances
+	    this.hasTransition =
+	      this.el.hasAttribute(config.prefix + 'transition')
 	    this.cache = Object.create(null)
 	  },
 
@@ -5967,7 +6109,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      this.template = transclude(this.template)
 	      this._linkFn = compile(this.template, options)
 	    } else {
-	      this._asComponent = true
+	      this.asComponent = true
 	      var tokens = textParser.parse(id)
 	      if (!tokens) { // static component
 	        var Ctor = this.Ctor = options.components[id]
@@ -5998,14 +6140,27 @@ return /******/ (function(modules) { // webpackBootstrap
 	   * Update.
 	   * This is called whenever the Array mutates.
 	   *
-	   * @param {Array} data
+	   * @param {Array|Number|String} data
 	   */
 
 	  update: function (data) {
-	    if (typeof data === 'number') {
+	    data = data || []
+	    var type = typeof data
+	    if (type === 'number') {
 	      data = range(data)
+	    } else if (type === 'string') {
+	      data = _.toArray(data)
 	    }
-	    this.vms = this.diff(data || [], this.vms)
+	    // There are two situations where we have to use the
+	    // more complex but more accurate diff algorithm:
+	    // 1. We are using components with v-repeat - the
+	    //    components could have additional state outside
+	    //    of v-repeat data.
+	    // 2. We have transitions on the list, which requires
+	    //    precise DOM re-positioning.
+	    this.vms = this.asComponent || this.hasTransition
+	      ? this.diff(data, this.vms)
+	      : this.inplaceUpdate(data, this.vms)
 	    // update v-ref
 	    if (this.refID) {
 	      this.vm.$[this.refID] = this.vms
@@ -6015,6 +6170,43 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return vm.$el
 	      })
 	    }
+	  },
+
+	  /**
+	   * Inplace update that maximally reuses existing vm
+	   * instances and DOM nodes by simply swapping data into
+	   * existing vms.
+	   *
+	   * @param {Array} data
+	   * @param {Array} oldVms
+	   * @return {Array}
+	   */
+
+	  inplaceUpdate: function (data, oldVms) {
+	    oldVms = oldVms || []
+	    var vms
+	    var dir = this
+	    var alias = dir.arg
+	    var converted = dir.converted
+	    if (data.length < oldVms.length) {
+	      oldVms.slice(data.length).forEach(function (vm) {
+	        vm.$destroy(true)
+	      })
+	      vms = oldVms.slice(0, data.length)
+	      overwrite(data, vms, alias, converted)
+	    } else if (data.length > oldVms.length) {
+	      var newVms = data.slice(oldVms.length).map(function (data, i) {
+	        var vm = dir.build(data, i + oldVms.length)
+	        vm.$before(dir.ref)
+	        return vm
+	      })
+	      overwrite(data.slice(0, oldVms.length), oldVms, alias, converted)
+	      vms = oldVms.concat(newVms)
+	    } else {
+	      overwrite(data, oldVms, alias, converted)
+	      vms = oldVms
+	    }
+	    return vms
 	  },
 
 	  /**
@@ -6047,13 +6239,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // instance.
 	    for (i = 0, l = data.length; i < l; i++) {
 	      obj = data[i]
-	      raw = converted ? obj.value : obj
+	      raw = converted ? obj.$value : obj
 	      vm = !init && this.getVm(raw)
 	      if (vm) { // reusable instance
 	        vm._reused = true
 	        vm.$index = i // update $index
 	        if (converted) {
-	          vm.$key = obj.key // update $key
+	          vm.$key = obj.$key // update $key
 	        }
 	        if (idKey) { // swap track by id data
 	          if (alias) {
@@ -6063,7 +6255,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	          }
 	        }
 	      } else { // new instance
-	        vm = this.build(obj, i)
+	        vm = this.build(obj, i, true)
 	        vm._new = true
 	      }
 	      vms[i] = vm
@@ -6129,17 +6321,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	   *
 	   * @param {Object} data
 	   * @param {Number} index
+	   * @param {Boolean} needCache
 	   */
 
-	  build: function (data, index) {
+	  build: function (data, index, needCache) {
 	    var original = data
 	    var meta = { $index: index }
 	    if (this.converted) {
-	      meta.$key = original.key
+	      meta.$key = original.$key
 	    }
-	    var raw = this.converted ? data.value : data
+	    var raw = this.converted ? data.$value : data
 	    var alias = this.arg
-	    var hasAlias = !isPlainObject(raw) || alias
+	    var hasAlias = !isObject(raw) || !isPlainObject(data) || alias
 	    // wrap the raw data with alias
 	    data = hasAlias ? {} : raw
 	    if (alias) {
@@ -6151,14 +6344,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var Ctor = this.Ctor || this.resolveCtor(data, meta)
 	    var vm = this.vm.$addChild({
 	      el: templateParser.clone(this.template),
-	      _asComponent: this._asComponent,
+	      _asComponent: this.asComponent,
 	      _linkFn: this._linkFn,
 	      _meta: meta,
 	      data: data,
 	      inherit: this.inherit
 	    }, Ctor)
+	    // flag this instance as a repeat instance
+	    // so that we can skip it in vm._digest
+	    vm._repeat = true
 	    // cache instance
-	    this.cacheVm(raw, vm)
+	    if (needCache) {
+	      this.cacheVm(raw, vm)
+	    }
 	    return vm
 	  },
 
@@ -6199,12 +6397,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (this.refID) {
 	      this.vm.$[this.refID] = null
 	    }
+	    var needUncache = this.asComponent || this.hasTransition
 	    if (this.vms) {
 	      var i = this.vms.length
 	      var vm
 	      while (i--) {
 	        vm = this.vms[i]
-	        this.uncacheVm(vm)
+	        if (needUncache) {
+	          this.uncacheVm(vm)
+	        }
 	        vm.$destroy()
 	      }
 	    }
@@ -6231,7 +6432,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (!cache[id]) {
 	        cache[id] = vm
 	      } else {
-	        _.warn('Duplicate ID in v-repeat: ' + id)
+	        _.warn('Duplicate track-by key in v-repeat: ' + id)
 	      }
 	    } else if (isObject(data)) {
 	      id = this.id
@@ -6240,7 +6441,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	          data[id] = vm
 	        } else {
 	          _.warn(
-	            'Duplicate objects are not supported in v-repeat.'
+	            'Duplicate objects are not supported in v-repeat ' +
+	            'when using components or transitions.'
 	          )
 	        }
 	      } else {
@@ -6349,8 +6551,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  while (i--) {
 	    key = keys[i]
 	    res[i] = {
-	      key: key,
-	      value: obj[key]
+	      $key: key,
+	      $value: obj[key]
 	    }
 	  }
 	  // `this` points to the repeat directive instance
@@ -6372,6 +6574,35 @@ return /******/ (function(modules) { // webpackBootstrap
 	    ret[i] = i
 	  }
 	  return ret
+	}
+
+	/**
+	 * Helper function to overwrite new data Array on to
+	 * existing vms. Used in `inplaceUpdate`.
+	 *
+	 * @param {Array} arr
+	 * @param {Array} vms
+	 * @param {String|undefined} alias
+	 * @param {Boolean} converted
+	 */
+
+	function overwrite (arr, vms, alias, converted) {
+	  var vm, data, raw
+	  for (var i = 0, l = arr.length; i < l; i++) {
+	    vm = vms[i]
+	    data = raw = arr[i]
+	    if (converted) {
+	      vm.$key = data.$key
+	      raw = data.$value
+	    }
+	    if (alias) {
+	      vm[alias] = raw
+	    } else if (!isObject(raw)) {
+	      vm.$value = raw
+	    } else {
+	      vm._setData(raw)
+	    }
+	  }
 	}
 
 /***/ },
@@ -6639,8 +6870,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  // sort on a copy to avoid mutating original array
 	  return arr.slice().sort(function (a, b) {
-	    a = Path.get(a, key)
-	    b = Path.get(b, key)
+	    a = _.isObject(a) ? Path.get(a, key) : a
+	    b = _.isObject(b) ? Path.get(b, key) : b
 	    return a === b ? 0 : a > b ? order : -order
 	  })
 	}
@@ -6834,6 +7065,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (childOb) {
 	    childOb.deps.push(dep)
 	  }
+
+	  var isFunc = function(fn) {
+	    return typeof fn === 'function'
+	  }
+
+	  var getter, setter
+	  if (typeof val === 'object' && val.hasOwnProperty('value')) {
+	    if (isFunc(val.get) || isFunc(val.set)) {
+	      getter = val.get
+	      setter = val.set
+	      val = val.value
+	    }
+	  }
+
 	  Object.defineProperty(ob.value, key, {
 	    enumerable: true,
 	    configurable: true,
@@ -6843,9 +7088,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (ob.active && Observer.target) {
 	        Observer.target.addDep(dep)
 	      }
-	      return val
+	      return getter ? getter.call(this, val) : val
 	    },
 	    set: function (newVal) {
+	      if(setter) {
+	        newVal = setter.call(this, newVal, val)
+	      }
+
+	      // notify guards
+	      var guards = this.__guards__ && this.__guards__[key]
+	      if (guards) {
+	        var i, l
+	        for (i=0,l=guards.length; i<l; i++) {
+	          guards[i].call(this, newVal, val)
+	        }
+	      }
+
 	      if (newVal === val) return
 	      // remove dep from old value
 	      var oldChildOb = val && val.__ob__
@@ -7440,6 +7698,24 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _ = __webpack_require__(11)
 	var objProto = Object.prototype
 
+
+	function registerWatcher (vm, key, handler) {
+	  if (typeof handler === 'string') {
+	    var methods = vm.$options.methods
+	    handler = methods && methods[handler]
+	  }
+
+	  if (typeof handler === 'function') {
+	    vm.$watch(key, _.methodize(handler, key))
+	  }
+
+	  if (_.isArray(handler)) {
+	    handler.forEach(function(aHandler){
+	      registerWatcher(vm, key, aHandler)
+	    })
+	  }
+	}
+
 	/**
 	 * Add a new property to an observed object
 	 * and emits corresponding event
@@ -7465,6 +7741,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	      while (i--) {
 	        var vm = ob.vms[i]
 	        vm._proxy(key)
+
+	        var options = vm.$options
+	        var handler = options.watch && options.watch['*']
+	        registerWatcher(vm, key, handler)
+
 	        vm._digest()
 	      }
 	    } else {
@@ -7751,6 +8032,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	var _ = __webpack_require__(11)
+	var hasjQuery = typeof jQuery === 'function'
 
 	module.exports = {
 
@@ -7763,6 +8045,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var lazy = this._checkParam('lazy') != null
 	    // - number: cast value into number when updating model.
 	    var number = this._checkParam('number') != null
+	    // - debounce: debounce the input listener
+	    var debounce = parseInt(this._checkParam('debounce'), 10)
 
 	    // handle composition events.
 	    // http://blog.evanyou.me/2014/01/03/composition-event/
@@ -7793,7 +8077,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // the input with the filtered value.
 	    // also force update for type="range" inputs to enable
 	    // "lock in range" (see #506)
-	    this.listener = this.filters || el.type === 'range'
+	    var hasReadFilter = this.filters && this.filters.read
+	    this.listener = hasReadFilter || el.type === 'range'
 	      ? function textInputListener () {
 	          if (cpLocked) return
 	          var charsOffset
@@ -7829,8 +8114,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	          set()
 	        }
 
+	    if (debounce) {
+	      this.listener = _.debounce(this.listener, debounce)
+	    }
 	    this.event = lazy ? 'change' : 'input'
 	    _.on(el, this.event, this.listener)
+
+	    // support jQuery change event, jQuery.trigger() doesn't
+	    // trigger native change event in some cases
+	    if (hasjQuery) {
+	      jQuery(el).on('change', this.listener)
+	    }
 
 	    // IE9 doesn't fire input event on backspace/del/cut
 	    if (!lazy && _.isIE9) {
@@ -7864,6 +8158,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  unbind: function () {
 	    var el = this.el
 	    _.off(el, this.event, this.listener)
+	    if (hasjQuery) {
+	      jQuery(el).off('change', this.listener)
+	    }
 	    _.off(el,'compositionstart', this.cpLock)
 	    _.off(el,'compositionend', this.cpUnlock)
 	    if (this.onCut) {
@@ -7911,6 +8208,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _ = __webpack_require__(11)
 	var Watcher = __webpack_require__(25)
+	var dirParser = __webpack_require__(21)
 
 	module.exports = {
 
@@ -7929,7 +8227,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	        ? getMultiValue(el)
 	        : el.value
 	      value = self.number
-	        ? _.toNumber(value)
+	        ? _.isArray(value)
+	          ? value.map(_.toNumber)
+	          : _.toNumber(value)
 	        : value
 	      self.set(value, true)
 	    }
@@ -7970,6 +8270,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function initOptions (expression) {
 	  var self = this
+	  var descriptor = dirParser.parse(expression)[0]
 	  function optionUpdateWatcher (value) {
 	    if (_.isArray(value)) {
 	      self.el.innerHTML = ''
@@ -7983,9 +8284,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  this.optionWatcher = new Watcher(
 	    this.vm,
-	    expression,
+	    descriptor.expression,
 	    optionUpdateWatcher,
-	    { deep: true }
+	    {
+	      deep: true,
+	      filters: _.resolveFilters(this.vm, descriptor.filters)
+	    }
 	  )
 	  // update with initial value
 	  optionUpdateWatcher(this.optionWatcher.value)

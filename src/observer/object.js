@@ -1,6 +1,24 @@
 var _ = require('../util')
 var objProto = Object.prototype
 
+
+function registerWatcher (vm, key, handler) {
+  if (typeof handler === 'string') {
+    var methods = vm.$options.methods
+    handler = methods && methods[handler]
+  }
+
+  if (typeof handler === 'function') {
+    vm.$watch(key, _.methodize(handler, key))
+  }
+
+  if (_.isArray(handler)) {
+    handler.forEach(function(aHandler){
+      registerWatcher(vm, key, aHandler)
+    })
+  }
+}
+
 /**
  * Add a new property to an observed object
  * and emits corresponding event
@@ -29,9 +47,7 @@ _.define(
 
         var options = vm.$options
         var handler = options.watch && options.watch['*']
-        if (handler) {
-          vm.$watch(key, _.methodize(handler, key))
-        }
+        registerWatcher(vm, key, handler)
 
         vm._digest()
       }
