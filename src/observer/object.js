@@ -26,6 +26,13 @@ _.define(
       while (i--) {
         var vm = ob.vms[i]
         vm._proxy(key)
+
+        var options = vm.$options
+        var handler = options.watch && options.watch['*']
+        if (handler) {
+          vm.$watch(key, _.methodize(handler, key))
+        }
+
         vm._digest()
       }
     } else {
